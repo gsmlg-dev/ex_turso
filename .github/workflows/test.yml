@@ -1,0 +1,67 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    name: ExUnit
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          elixir-version: "1.19"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Mix dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-test-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-test-
+            ${{ runner.os }}-mix-
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            native/ex_turso/target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('native/ex_turso/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-
+            ${{ runner.os }}-cargo-
+
+      - name: Install dependencies
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+
+      - name: Run ExUnit
+        run: mix test

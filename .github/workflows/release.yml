@@ -1,0 +1,122 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 1.2.3)"
+        required: true
+        type: string
+      git_ref:
+        description: "Git ref to release from"
+        required: true
+        default: "main"
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    name: Publish Hex package
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: prod
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Checkout release ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Erlang and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          elixir-version: "1.19"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Mix dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-release-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-release-
+            ${{ runner.os }}-mix-
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            native/ex_turso/target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('native/ex_turso/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-cargo-
+
+      - name: Install dependencies
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+
+      - name: Update package version
+        run: |
+          perl -0pi -e "s/version: \"[^\"]+\"/version: \"${VERSION}\"/" mix.exs
+          perl -0pi -e "s/^version = \"[^\"]+\"/version = \"${VERSION}\"/m" native/ex_turso/Cargo.toml
+          cargo metadata --manifest-path native/ex_turso/Cargo.toml --format-version 1 > /dev/null
+
+      - name: Build package artifacts
+        run: |
+          mkdir -p artifacts
+          mix hex.build --output "artifacts/ex_turso-${VERSION}.tar"
+          git ls-files -z | tar --null -czf "artifacts/ex_turso-${VERSION}-source.tar.gz" \
+            --transform "s#^#ex_turso-${VERSION}/#" \
+            --files-from -
+
+      - name: Publish package to Hex
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        run: mix hex.publish package --yes
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add mix.exs native/ex_turso/Cargo.toml native/ex_turso/Cargo.lock
+          git commit -m "chore(release): v${VERSION}"
+
+      - name: Create release tag
+        run: git tag "v${VERSION}"
+
+      - name: Push release commit and tag
+        run: |
+          git push origin "HEAD:${{ inputs.git_ref }}"
+          git push origin "v${VERSION}"
+
+      - name: Generate release notes
+        run: |
+          previous_tag="$(git describe --tags --abbrev=0 "v${VERSION}^" 2>/dev/null || true)"
+          if [ -n "$previous_tag" ]; then
+            git log --pretty=format:"- %s (%h)" "${previous_tag}..v${VERSION}" > release-notes.md
+          else
+            git log --pretty=format:"- %s (%h)" "v${VERSION}" > release-notes.md
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "v${VERSION}" artifacts/* --notes-file release-notes.md

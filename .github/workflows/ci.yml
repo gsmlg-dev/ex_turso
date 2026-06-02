@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - "**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-checks:
+    name: Static checks and build
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          elixir-version: "1.19"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Mix dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            native/ex_turso/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('native/ex_turso/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install Mix dependencies
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+
+      - name: Check Elixir formatting
+        run: mix format --check-formatted
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path native/ex_turso/Cargo.toml --check
+
+      - name: Run Rust lints
+        run: cargo clippy --manifest-path native/ex_turso/Cargo.toml --locked --all-targets --all-features -- -D warnings
+
+      - name: Build native crate
+        run: cargo build --manifest-path native/ex_turso/Cargo.toml --locked
+
+      - name: Compile Elixir package
+        run: mix compile --warnings-as-errors
