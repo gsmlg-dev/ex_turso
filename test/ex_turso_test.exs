@@ -99,6 +99,7 @@ defmodule ExTursoTest do
   test "cursors callbacks return unsupported error" do
     state = %ExTurso.Connection{}
     query = %ExTurso.Query{}
+
     assert {:error, %ExTurso.Error{message: "cursors are not supported"}, ^state} =
              ExTurso.Connection.handle_declare(query, [], [], state)
 
@@ -129,6 +130,7 @@ defmodule ExTursoTest do
       id: pool_name,
       start: {ExTurso, :start_link, [[database: db_path, name: pool_name, pool_size: 5]]}
     }
+
     start_supervised!(spec)
 
     {:ok, _} = ExTurso.execute(pool_name, "CREATE TABLE items (val INTEGER)")
@@ -157,8 +159,11 @@ defmodule ExTursoTest do
     {:ok, _} = ExTurso.execute(db, "CREATE TABLE items_vector (id INTEGER, embedding BLOB)")
 
     # Insert float vector data using SQLite vector representation
-    {:ok, _} = ExTurso.execute(db, "INSERT INTO items_vector VALUES (?, vector32('[1.0, 2.0, 3.0]'))", [1])
-    {:ok, _} = ExTurso.execute(db, "INSERT INTO items_vector VALUES (?, vector32('[4.0, 5.0, 6.0]'))", [2])
+    {:ok, _} =
+      ExTurso.execute(db, "INSERT INTO items_vector VALUES (?, vector32('[1.0, 2.0, 3.0]'))", [1])
+
+    {:ok, _} =
+      ExTurso.execute(db, "INSERT INTO items_vector VALUES (?, vector32('[4.0, 5.0, 6.0]'))", [2])
 
     # Query with vector distance calculation (using cosine similarity/distance)
     assert {:ok, %Result{rows: [%{"id" => 1, "distance" => distance}]}} =
@@ -168,5 +173,37 @@ defmodule ExTursoTest do
              )
 
     assert abs(distance) < 1.0e-5
+  end
+
+  test "sync/2 returns error if database is not configured for sync", %{db: db} do
+    assert {:error, %ExTurso.Error{message: "database is not configured for cloud sync"}} =
+             ExTurso.sync(db)
+  end
+
+  test "sync/2 returns error if called inside a transaction", %{db: db} do
+    assert {:error, %ExTurso.Error{message: "cannot sync database inside a transaction"}} =
+             DBConnection.transaction(db, fn conn ->
+               case ExTurso.sync(conn) do
+                 {:error, err} -> DBConnection.rollback(conn, err)
+                 _ -> :ok
+               end
+             end)
+  end
+
+  test "connect/1 returns error if only one of remote_url or auth_token is provided" do
+    assert {:error,
+            %ExTurso.Error{
+              message: "both :remote_url and :auth_token must be provided for a synced database"
+            }} =
+             ExTurso.Connection.connect(
+               database: ":memory:",
+               remote_url: "libsql://some-url.turso.io"
+             )
+
+    assert {:error,
+            %ExTurso.Error{
+              message: "both :remote_url and :auth_token must be provided for a synced database"
+            }} =
+             ExTurso.Connection.connect(database: ":memory:", auth_token: "some-token")
   end
 end

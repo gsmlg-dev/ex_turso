@@ -74,6 +74,19 @@ defmodule ExTurso do
     run(conn, statement, :execute, params, opts)
   end
 
+  @doc """
+  Triggers a synchronization of the local replica database with the remote Turso Cloud database.
+  """
+  @spec sync(conn(), keyword()) :: :ok | {:error, Exception.t()}
+  def sync(conn, opts \\ []) do
+    query = %Query{statement: "SYNC", command: :sync}
+
+    case DBConnection.execute(conn, query, [], opts) do
+      {:ok, _query, _result} -> :ok
+      {:error, _exception} = error -> error
+    end
+  end
+
   defp run(conn, statement, command, params, opts) do
     query = %Query{statement: statement, command: command}
 
