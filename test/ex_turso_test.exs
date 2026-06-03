@@ -72,4 +72,83 @@ defmodule ExTursoTest do
     assert {:ok, %Result{rows: [%{"score" => 1.0}]}} =
              ExTurso.query(db, "SELECT score FROM users WHERE id = ?", [1])
   end
+
+  test "blob parameters bind and return as binary", %{db: db} do
+    {:ok, _} = ExTurso.execute(db, "CREATE TABLE blobs (id INTEGER, data BLOB)")
+    blob = <<0, 1, 2, 255>>
+    {:ok, _} = ExTurso.execute(db, "INSERT INTO blobs VALUES (?, ?)", [1, blob])
+
+    assert {:ok, %Result{rows: [%{"data" => ^blob}]}} =
+             ExTurso.query(db, "SELECT data FROM blobs WHERE id = ?", [1])
+  end
+
+  test "ping/1 callback returns {:ok, state}" do
+    state = %ExTurso.Connection{}
+    assert {:ok, ^state} = ExTurso.Connection.ping(state)
+  end
+
+  test "status changes between idle and transaction", %{db: db} do
+    assert :idle = DBConnection.status(db)
+
+    {:ok, _} =
+      DBConnection.transaction(db, fn conn ->
+        assert :transaction = DBConnection.status(conn)
+      end)
+  end
+
+  test "cursors callbacks return unsupported error" do
+    state = %ExTurso.Connection{}
+    query = %ExTurso.Query{}
+    assert {:error, %ExTurso.Error{message: "cursors are not supported"}, ^state} =
+             ExTurso.Connection.handle_declare(query, [], [], state)
+
+    assert {:error, %ExTurso.Error{message: "cursors are not supported"}, ^state} =
+             ExTurso.Connection.handle_fetch(query, :cursor, [], state)
+
+    assert {:error, %ExTurso.Error{message: "cursors are not supported"}, ^state} =
+             ExTurso.Connection.handle_deallocate(query, :cursor, [], state)
+  end
+
+  test "connect/1 callback raises KeyError if :database is missing" do
+    assert_raise KeyError, fn ->
+      ExTurso.Connection.connect([])
+    end
+  end
+
+  test "connect/1 callback returns error on invalid database path" do
+    assert {:error, %ExTurso.Error{message: message}} = ExTurso.Connection.connect(database: "")
+    assert is_binary(message)
+  end
+
+  @tag :tmp_dir
+  test "handles concurrent queries with a pool", %{tmp_dir: tmp_dir} do
+    db_path = Path.join(tmp_dir, "concurrent_test.db")
+    pool_name = :"db_pool_#{System.unique_integer([:positive])}"
+
+    spec = %{
+      id: pool_name,
+      start: {ExTurso, :start_link, [[database: db_path, name: pool_name, pool_size: 5]]}
+    }
+    start_supervised!(spec)
+
+    {:ok, _} = ExTurso.execute(pool_name, "CREATE TABLE items (val INTEGER)")
+
+    # Populate data
+    for i <- 1..50 do
+      {:ok, _} = ExTurso.execute(pool_name, "INSERT INTO items VALUES (?)", [i])
+    end
+
+    # Query concurrently
+    results =
+      1..50
+      |> Task.async_stream(fn i ->
+        ExTurso.query(pool_name, "SELECT val FROM items WHERE val = ?", [i])
+      end)
+      |> Enum.to_list()
+
+    # Assert success
+    for {:ok, {:ok, %Result{rows: [%{"val" => val}]}}} <- results do
+      assert val in 1..50
+    end
+  end
 end
