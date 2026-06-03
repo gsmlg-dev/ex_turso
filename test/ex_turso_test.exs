@@ -151,4 +151,22 @@ defmodule ExTursoTest do
       assert val in 1..50
     end
   end
+
+  test "vector search functions compile and execute successfully", %{db: db} do
+    # Create table with vector column (represented as F32_BLOB or general BLOB)
+    {:ok, _} = ExTurso.execute(db, "CREATE TABLE items_vector (id INTEGER, embedding BLOB)")
+
+    # Insert float vector data using SQLite vector representation
+    {:ok, _} = ExTurso.execute(db, "INSERT INTO items_vector VALUES (?, vector32('[1.0, 2.0, 3.0]'))", [1])
+    {:ok, _} = ExTurso.execute(db, "INSERT INTO items_vector VALUES (?, vector32('[4.0, 5.0, 6.0]'))", [2])
+
+    # Query with vector distance calculation (using cosine similarity/distance)
+    assert {:ok, %Result{rows: [%{"id" => 1, "distance" => distance}]}} =
+             ExTurso.query(
+               db,
+               "SELECT id, vector_distance_cos(embedding, vector32('[1.0, 2.0, 3.0]')) as distance FROM items_vector ORDER BY distance LIMIT 1"
+             )
+
+    assert abs(distance) < 1.0e-5
+  end
 end
