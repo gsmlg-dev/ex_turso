@@ -151,8 +151,11 @@ fn open_sync(
 fn connect_sync(
     db: ResourceArc<SyncDbResource>,
 ) -> Result<ResourceArc<ConnResource>, String> {
-    let guard = db.inner.lock().map_err(|e| e.to_string())?;
-    let conn = RT.block_on(async { guard.connect().await.map_err(|e| e.to_string()) })?;
+    let db_clone = {
+        let guard = db.inner.lock().map_err(|e| e.to_string())?;
+        guard.clone()
+    };
+    let conn = RT.block_on(async { db_clone.connect().await.map_err(|e| e.to_string()) })?;
     Ok(ResourceArc::new(ConnResource {
         inner: Mutex::new(conn),
     }))
@@ -161,10 +164,13 @@ fn connect_sync(
 /// Run bidirectional sync.
 #[rustler::nif(schedule = "DirtyIo")]
 fn sync(db: ResourceArc<SyncDbResource>) -> Result<rustler::types::atom::Atom, String> {
-    let guard = db.inner.lock().map_err(|e| e.to_string())?;
+    let db_clone = {
+        let guard = db.inner.lock().map_err(|e| e.to_string())?;
+        guard.clone()
+    };
     RT.block_on(async {
-        guard.pull().await.map_err(|e| e.to_string())?;
-        guard.push().await.map_err(|e| e.to_string())?;
+        db_clone.pull().await.map_err(|e| e.to_string())?;
+        db_clone.push().await.map_err(|e| e.to_string())?;
         Ok::<(), String>(())
     })?;
     Ok(atoms::ok())

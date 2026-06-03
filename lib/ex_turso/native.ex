@@ -30,6 +30,18 @@ defmodule ExTurso.Native do
           {:ok, non_neg_integer()} | {:error, String.t()}
   def execute(_conn, _sql, _params), do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc "Open (or create) a local database synced with a remote database."
+  @spec open_sync(String.t(), String.t(), String.t()) :: {:ok, reference()} | {:error, String.t()}
+  def open_sync(_path, _remote_url, _auth_token), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc "Open a connection against a synced database."
+  @spec connect_sync(reference()) :: {:ok, reference()} | {:error, String.t()}
+  def connect_sync(_db), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc "Run bidirectional sync."
+  @spec sync(reference()) :: :ok | {:error, String.t()}
+  def sync(_db), do: :erlang.nif_error(:nif_not_loaded)
+
   @doc "Flush and release a connection. Returns `:ok`."
   @spec close(reference()) :: :ok
   def close(_conn), do: :erlang.nif_error(:nif_not_loaded)
