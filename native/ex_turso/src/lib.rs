@@ -36,6 +36,14 @@ struct ConnResource {
 #[rustler::resource_impl]
 impl rustler::Resource for ConnResource {}
 
+/// Resource wrapping an open `turso::sync::Database`.
+struct SyncDbResource {
+    inner: Mutex<turso::sync::Database>,
+}
+
+#[rustler::resource_impl]
+impl rustler::Resource for SyncDbResource {}
+
 /// A decoded SQL value ready to be encoded back into an Elixir term.
 enum SqlValue {
     Null,
@@ -115,6 +123,53 @@ fn connect(db: ResourceArc<DbResource>) -> Result<ResourceArc<ConnResource>, Str
         Err(e) => Err(e.to_string()),
     }
 }
+
+/// Open (or create) a local database synced with a remote database.
+#[rustler::nif(schedule = "DirtyIo")]
+fn open_sync(
+    path: String,
+    remote_url: String,
+    auth_token: String,
+) -> Result<ResourceArc<SyncDbResource>, String> {
+    let result = RT.block_on(async {
+        turso::sync::Builder::new_remote(&path)
+            .with_remote_url(&remote_url)
+            .with_auth_token(&auth_token)
+            .build()
+            .await
+    });
+    match result {
+        Ok(db) => Ok(ResourceArc::new(SyncDbResource {
+            inner: Mutex::new(db),
+        })),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Open a connection against a synced database.
+#[rustler::nif(schedule = "DirtyIo")]
+fn connect_sync(
+    db: ResourceArc<SyncDbResource>,
+) -> Result<ResourceArc<ConnResource>, String> {
+    let guard = db.inner.lock().map_err(|e| e.to_string())?;
+    let conn = RT.block_on(async { guard.connect().await.map_err(|e| e.to_string()) })?;
+    Ok(ResourceArc::new(ConnResource {
+        inner: Mutex::new(conn),
+    }))
+}
+
+/// Run bidirectional sync.
+#[rustler::nif(schedule = "DirtyIo")]
+fn sync(db: ResourceArc<SyncDbResource>) -> Result<rustler::types::atom::Atom, String> {
+    let guard = db.inner.lock().map_err(|e| e.to_string())?;
+    RT.block_on(async {
+        guard.pull().await.map_err(|e| e.to_string())?;
+        guard.push().await.map_err(|e| e.to_string())?;
+        Ok::<(), String>(())
+    })?;
+    Ok(atoms::ok())
+}
+
 
 /// Run a query and return its rows as a list of maps keyed by column name.
 #[rustler::nif(schedule = "DirtyIo")]
