@@ -16,20 +16,37 @@ defmodule ExTurso.Connection do
   @type t :: %__MODULE__{
           db: reference(),
           conn: reference(),
+          sync_db: reference() | nil,
           status: :idle | :transaction
         }
 
-  defstruct [:db, :conn, status: :idle]
+  defstruct [:db, :conn, :sync_db, status: :idle]
 
   @impl true
   def connect(opts) do
     database = Keyword.fetch!(opts, :database)
+    remote_url = opts[:remote_url]
+    auth_token = opts[:auth_token]
 
-    with {:ok, db} <- Native.open(database),
-         {:ok, conn} <- Native.connect(db) do
-      {:ok, %__MODULE__{db: db, conn: conn}}
-    else
-      {:error, reason} -> {:error, %Error{message: reason}}
+    result =
+      if remote_url && auth_token do
+        with {:ok, db} <- Native.open_sync(database, remote_url, auth_token),
+             {:ok, conn} <- Native.connect_sync(db) do
+          {:ok, db, conn, true}
+        end
+      else
+        with {:ok, db} <- Native.open(database),
+             {:ok, conn} <- Native.connect(db) do
+          {:ok, db, conn, false}
+        end
+      end
+
+    case result do
+      {:ok, db, conn, is_sync} ->
+        {:ok, %__MODULE__{db: db, conn: conn, sync_db: if(is_sync, do: db, else: nil)}}
+
+      {:error, reason} ->
+        {:error, %Error{message: reason}}
     end
   end
 
@@ -69,6 +86,18 @@ defmodule ExTurso.Connection do
     case Native.execute(conn, "ROLLBACK", []) do
       {:ok, _} -> {:ok, %Result{}, %{state | status: :idle}}
       {:error, reason} -> {:disconnect, %Error{message: reason}, state}
+    end
+  end
+
+  @impl true
+  def handle_execute(%Query{command: :sync} = query, _params, _opts, state) do
+    if state.sync_db do
+      case Native.sync(state.sync_db) do
+        :ok -> {:ok, query, %Result{rows: nil, num_rows: 0}, state}
+        {:error, reason} -> {:error, %Error{message: reason}, state}
+      end
+    else
+      {:error, %Error{message: "database is not configured for cloud sync"}, state}
     end
   end
 
