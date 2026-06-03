@@ -29,16 +29,21 @@ defmodule ExTurso.Connection do
     auth_token = opts[:auth_token]
 
     result =
-      if remote_url && auth_token do
-        with {:ok, db} <- Native.open_sync(database, remote_url, auth_token),
-             {:ok, conn} <- Native.connect_sync(db) do
-          {:ok, db, conn, true}
-        end
-      else
-        with {:ok, db} <- Native.open(database),
-             {:ok, conn} <- Native.connect(db) do
-          {:ok, db, conn, false}
-        end
+      cond do
+        remote_url && auth_token ->
+          with {:ok, db} <- Native.open_sync(database, remote_url, auth_token),
+               {:ok, conn} <- Native.connect_sync(db) do
+            {:ok, db, conn, true}
+          end
+
+        remote_url || auth_token ->
+          {:error, "both :remote_url and :auth_token must be provided for a synced database"}
+
+        true ->
+          with {:ok, db} <- Native.open(database),
+               {:ok, conn} <- Native.connect(db) do
+            {:ok, db, conn, false}
+          end
       end
 
     case result do
@@ -91,13 +96,18 @@ defmodule ExTurso.Connection do
 
   @impl true
   def handle_execute(%Query{command: :sync} = query, _params, _opts, state) do
-    if state.sync_db do
-      case Native.sync(state.sync_db) do
-        :ok -> {:ok, query, %Result{rows: nil, num_rows: 0}, state}
-        {:error, reason} -> {:error, %Error{message: reason}, state}
-      end
-    else
-      {:error, %Error{message: "database is not configured for cloud sync"}, state}
+    cond do
+      state.status == :transaction ->
+        {:error, %Error{message: "cannot sync database inside a transaction"}, state}
+
+      is_nil(state.sync_db) ->
+        {:error, %Error{message: "database is not configured for cloud sync"}, state}
+
+      true ->
+        case Native.sync(state.sync_db) do
+          :ok -> {:ok, query, %Result{rows: nil, num_rows: 0}, state}
+          {:error, reason} -> {:error, %Error{message: reason}, state}
+        end
     end
   end
 

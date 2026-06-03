@@ -8,7 +8,7 @@ defmodule ExTurso.Query do
     * `:execute` — returns the affected-row count (via `ExTurso.Native.execute/3`)
   """
 
-  @type command :: :query | :execute
+  @type command :: :query | :execute | :sync
 
   @type t :: %__MODULE__{
           statement: String.t(),
