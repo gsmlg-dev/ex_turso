@@ -82,8 +82,8 @@ defmodule ExTursoTest do
              ExTurso.query(db, "SELECT data FROM blobs WHERE id = ?", [1])
   end
 
-  test "ping/1 callback returns {:ok, state}" do
-    state = %ExTurso.Connection{}
+  test "ping/1 callback runs a real query against the connection" do
+    {:ok, state} = ExTurso.Connection.connect(database: ":memory:")
     assert {:ok, ^state} = ExTurso.Connection.ping(state)
   end
 
@@ -148,8 +148,11 @@ defmodule ExTursoTest do
       end)
       |> Enum.to_list()
 
-    # Assert success
-    for {:ok, {:ok, %Result{rows: [%{"val" => val}]}}} <- results do
+    # Every task must have completed and every query must have succeeded.
+    assert length(results) == 50
+
+    for {:ok, result} <- results do
+      assert {:ok, %Result{rows: [%{"val" => val}]}} = result
       assert val in 1..50
     end
   end
@@ -205,5 +208,40 @@ defmodule ExTursoTest do
               message: "both :remote_url and :auth_token must be provided for a synced database"
             }} =
              ExTurso.Connection.connect(database: ":memory:", auth_token: "some-token")
+  end
+
+  test "connect/1 resolves a zero-arity function as auth_token" do
+    # The function resolves to nil, so validation must treat the token as absent.
+    assert {:error,
+            %ExTurso.Error{
+              message: "both :remote_url and :auth_token must be provided for a synced database"
+            }} =
+             ExTurso.Connection.connect(
+               database: ":memory:",
+               remote_url: "libsql://some-url.turso.io",
+               auth_token: fn -> nil end
+             )
+  end
+
+  test "boolean parameters bind as integers 1 and 0", %{db: db} do
+    assert {:ok, %Result{rows: [%{"t" => 1, "f" => 0}]}} =
+             ExTurso.query(db, "SELECT ? AS t, ? AS f", [true, false])
+  end
+
+  test "unsupported parameter types return :invalid_param instead of binding NULL", %{db: db} do
+    for param <- [:some_atom, [1, 2], %{a: 1}, 36_893_488_147_419_103_232] do
+      assert {:error, %ExTurso.Error{code: :invalid_param, message: message}} =
+               ExTurso.query(db, "SELECT ?", [param])
+
+      assert message =~ "index 0"
+    end
+  end
+
+  test "constraint violations carry the :constraint error code", %{db: db} do
+    {:ok, _} = ExTurso.execute(db, "CREATE TABLE uniq (id INTEGER PRIMARY KEY)")
+    {:ok, _} = ExTurso.execute(db, "INSERT INTO uniq VALUES (?)", [1])
+
+    assert {:error, %ExTurso.Error{code: :constraint}} =
+             ExTurso.execute(db, "INSERT INTO uniq VALUES (?)", [1])
   end
 end

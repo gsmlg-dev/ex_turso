@@ -20,12 +20,33 @@ defmodule ExTurso do
       {:ok, %ExTurso.Result{rows: [%{"name" => "Alice"}]}} =
         ExTurso.query(MyApp.DB, "SELECT name FROM users WHERE id = ?", [1])
 
+  ## Turso Cloud sync
+
+  Pass `:remote_url` and `:auth_token` to open the local file as an embedded
+  replica of a Turso Cloud database, then call `sync/2` to synchronize:
+
+      children = [
+        {ExTurso,
+         database: "replica.db",
+         remote_url: "libsql://my-db.turso.io",
+         auth_token: fn -> System.fetch_env!("TURSO_AUTH_TOKEN") end,
+         name: MyApp.DB}
+      ]
+
+      :ok = ExTurso.sync(MyApp.DB)
+
   ## Options
 
-  All options are forwarded to `DBConnection.start_link/2`. The only
-  `ExTurso`-specific option is:
+  All options are forwarded to `DBConnection.start_link/2`. The
+  `ExTurso`-specific options are:
 
-    * `:database` — path to the local database file (required)
+    * `:database` — path to the local database file (required); `":memory:"`
+      opens an in-memory database per pooled connection
+    * `:remote_url` — URL of a Turso Cloud database to sync with (requires
+      `:auth_token`)
+    * `:auth_token` — auth token for the remote database, either a string or
+      a zero-arity function returning one; prefer the function form so the
+      token does not sit in supervisor child specs and crash reports
   """
 
   alias ExTurso.Query

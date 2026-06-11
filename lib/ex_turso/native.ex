@@ -6,40 +6,45 @@ defmodule ExTurso.Native do
   `native/ex_turso/src/lib.rs`. The bodies below only exist so the module
   compiles and raises a clear error if the NIF fails to load.
 
-  All NIFs are scheduled on dirty IO threads and return `{:error, reason}` (with
-  `reason` a string) on failure.
+  All NIFs are scheduled on dirty IO threads and return `{:error, {code, reason}}`
+  on failure, where `code` is an error-class atom (see `t:ExTurso.Error.code/0`)
+  and `reason` is a string.
   """
 
   use Rustler, otp_app: :ex_turso, crate: "ex_turso"
 
-  @doc "Open (or create) a local database file. Returns `{:ok, db}` or `{:error, reason}`."
-  @spec open(String.t()) :: {:ok, reference()} | {:error, String.t()}
+  @typedoc "Error tuple returned by every NIF: an error-class atom plus a message."
+  @type nif_error :: {ExTurso.Error.code(), String.t()}
+
+  @doc "Open (or create) a local database file. Returns `{:ok, db}` or `{:error, {code, reason}}`."
+  @spec open(String.t()) :: {:ok, reference()} | {:error, nif_error()}
   def open(_path), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc "Open a connection against a database handle."
-  @spec connect(reference()) :: {:ok, reference()} | {:error, String.t()}
+  @spec connect(reference()) :: {:ok, reference()} | {:error, nif_error()}
   def connect(_db), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc "Run a query, returning rows as a list of maps keyed by column name."
   @spec query(reference(), String.t(), list()) ::
-          {:ok, [map()]} | {:error, String.t()}
+          {:ok, [map()]} | {:error, nif_error()}
   def query(_conn, _sql, _params), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc "Execute a statement, returning the number of affected rows."
   @spec execute(reference(), String.t(), list()) ::
-          {:ok, non_neg_integer()} | {:error, String.t()}
+          {:ok, non_neg_integer()} | {:error, nif_error()}
   def execute(_conn, _sql, _params), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc "Open (or create) a local database synced with a remote database."
-  @spec open_sync(String.t(), String.t(), String.t()) :: {:ok, reference()} | {:error, String.t()}
+  @spec open_sync(String.t(), String.t(), String.t()) ::
+          {:ok, reference()} | {:error, nif_error()}
   def open_sync(_path, _remote_url, _auth_token), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc "Open a connection against a synced database."
-  @spec connect_sync(reference()) :: {:ok, reference()} | {:error, String.t()}
+  @spec connect_sync(reference()) :: {:ok, reference()} | {:error, nif_error()}
   def connect_sync(_db), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc "Run bidirectional sync."
-  @spec sync(reference()) :: :ok | {:error, String.t()}
+  @spec sync(reference()) :: :ok | {:error, nif_error()}
   def sync(_db), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc "Flush and release a connection. Returns `:ok`."

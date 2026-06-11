@@ -6,6 +6,8 @@ defmodule ExTurso.Query do
 
     * `:query` — returns rows (via `ExTurso.Native.query/3`)
     * `:execute` — returns the affected-row count (via `ExTurso.Native.execute/3`)
+    * `:sync` — triggers replica sync (via `ExTurso.Native.sync/1`); the
+      statement text is ignored
   """
 
   @type command :: :query | :execute | :sync

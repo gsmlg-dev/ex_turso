@@ -86,8 +86,8 @@ graph TD
 *   **Supervision Strategy:**
     *   Supervised dynamically under the connection pool. If an error is returned as `{:disconnect, reason, state}`, the process exits normally or abnormally, triggering the supervisor to replace it.
 *   **Failure Modes & Recovery:**
-    *   *Database Locked / I/O Error:* Returns a `{:disconnect, ...}` signal to the pool manager, terminating the actor. The pool supervisor spawns a new connection actor which attempts a fresh NIF `open/1` and `connect/1`.
-    *   *Bad SQL Syntax:* Returns `{:error, ...}` to the caller. The actor's state remains intact and it continues processing subsequent queries from the mailbox.
+    *   *I/O Error / Corruption (`:io`, `:corrupt` error codes):* Returns a `{:disconnect, ...}` signal to the pool manager, terminating the actor. The pool supervisor spawns a new connection actor which attempts a fresh NIF `open/1` and `connect/1`. Transaction-control failures (`BEGIN`/`COMMIT`/`ROLLBACK`) also disconnect, since the transaction state is indeterminate.
+    *   *Bad SQL Syntax / Constraint Violation / Database Busy:* Returns `{:error, %ExTurso.Error{code: ...}}` to the caller. The actor's state remains intact and it continues processing subsequent queries from the mailbox. `:busy` errors are retryable by the caller.
 
 ---
 
@@ -103,11 +103,12 @@ graph TD
         *   `execute(conn_resource, sql, params)`: Runs an SQL write execution.
         *   `close(conn_resource)`: Flushes database cache.
     *   **Outgoing Signals (to Connection Actor):**
-        *   `{:ok, db_ref}` | `{:error, reason_str}`
-        *   `{:ok, conn_ref}` | `{:error, reason_str}`
-        *   `{:ok, rows_list}` | `{:error, reason_str}`
-        *   `{:ok, affected_rows}` | `{:error, reason_str}`
+        *   `{:ok, db_ref}` | `{:error, {code_atom, reason_str}}`
+        *   `{:ok, conn_ref}` | `{:error, {code_atom, reason_str}}`
+        *   `{:ok, rows_list}` | `{:error, {code_atom, reason_str}}`
+        *   `{:ok, affected_rows}` | `{:error, {code_atom, reason_str}}`
         *   `:ok`
+        *   `code_atom` classifies the failure (`:busy`, `:constraint`, `:io`, `:corrupt`, `:misuse`, `:invalid_param`, `:error`) so the connection actor can decide between `{:error, ...}` and `{:disconnect, ...}`.
 *   **Supervision Strategy:**
     *   Native code execution takes place in dirty I/O schedulers (`DirtyIo`), keeping the main Erlang schedulers free from async blockage.
     *   Lifetime of NIF resources (`DbResource`, `ConnResource`) is tied directly to the BEAM Garbage Collector via `ResourceArc` wrapping.

@@ -7,11 +7,19 @@ defmodule ExTurso.Connection do
 
     * `:database` — path to the local database file (required). `":memory:"`
       opens an in-memory database.
+    * `:remote_url` — URL of a Turso Cloud database to sync with (optional,
+      requires `:auth_token`).
+    * `:auth_token` — auth token for the remote database, either a string or a
+      zero-arity function returning one (optional, requires `:remote_url`).
   """
 
   use DBConnection
 
   alias ExTurso.{Error, Native, Query, Result}
+
+  # Errors in these classes mean the underlying connection is unusable; the
+  # pool drops the connection and opens a fresh one.
+  @disconnect_codes [:io, :corrupt]
 
   @type t :: %__MODULE__{
           db: reference(),
@@ -26,7 +34,7 @@ defmodule ExTurso.Connection do
   def connect(opts) do
     database = Keyword.fetch!(opts, :database)
     remote_url = opts[:remote_url]
-    auth_token = opts[:auth_token]
+    auth_token = resolve_secret(opts[:auth_token])
 
     result =
       cond do
@@ -51,7 +59,7 @@ defmodule ExTurso.Connection do
         {:ok, %__MODULE__{db: db, conn: conn, sync_db: if(is_sync, do: db, else: nil)}}
 
       {:error, reason} ->
-        {:error, %Error{message: reason}}
+        {:error, wrap_error(reason)}
     end
   end
 
@@ -65,7 +73,12 @@ defmodule ExTurso.Connection do
   def checkout(state), do: {:ok, state}
 
   @impl true
-  def ping(state), do: {:ok, state}
+  def ping(%__MODULE__{conn: conn} = state) do
+    case Native.query(conn, "SELECT 1", []) do
+      {:ok, _} -> {:ok, state}
+      {:error, reason} -> {:disconnect, wrap_error(reason), state}
+    end
+  end
 
   @impl true
   def handle_status(_opts, %__MODULE__{status: status} = state), do: {status, state}
@@ -74,7 +87,7 @@ defmodule ExTurso.Connection do
   def handle_begin(_opts, %__MODULE__{conn: conn} = state) do
     case Native.execute(conn, "BEGIN", []) do
       {:ok, _} -> {:ok, %Result{}, %{state | status: :transaction}}
-      {:error, reason} -> {:disconnect, %Error{message: reason}, state}
+      {:error, reason} -> {:disconnect, wrap_error(reason), state}
     end
   end
 
@@ -82,7 +95,7 @@ defmodule ExTurso.Connection do
   def handle_commit(_opts, %__MODULE__{conn: conn} = state) do
     case Native.execute(conn, "COMMIT", []) do
       {:ok, _} -> {:ok, %Result{}, %{state | status: :idle}}
-      {:error, reason} -> {:disconnect, %Error{message: reason}, state}
+      {:error, reason} -> {:disconnect, wrap_error(reason), state}
     end
   end
 
@@ -90,7 +103,7 @@ defmodule ExTurso.Connection do
   def handle_rollback(_opts, %__MODULE__{conn: conn} = state) do
     case Native.execute(conn, "ROLLBACK", []) do
       {:ok, _} -> {:ok, %Result{}, %{state | status: :idle}}
-      {:error, reason} -> {:disconnect, %Error{message: reason}, state}
+      {:error, reason} -> {:disconnect, wrap_error(reason), state}
     end
   end
 
@@ -106,7 +119,7 @@ defmodule ExTurso.Connection do
       true ->
         case Native.sync(state.sync_db) do
           :ok -> {:ok, query, %Result{rows: nil, num_rows: 0}, state}
-          {:error, reason} -> {:error, %Error{message: reason}, state}
+          {:error, reason} -> error_or_disconnect(reason, state)
         end
     end
   end
@@ -118,7 +131,7 @@ defmodule ExTurso.Connection do
         {:ok, query, %Result{rows: rows, num_rows: length(rows)}, state}
 
       {:error, reason} ->
-        {:error, %Error{message: reason}, state}
+        error_or_disconnect(reason, state)
     end
   end
 
@@ -128,7 +141,7 @@ defmodule ExTurso.Connection do
         {:ok, query, %Result{rows: nil, num_rows: affected}, state}
 
       {:error, reason} ->
-        {:error, %Error{message: reason}, state}
+        error_or_disconnect(reason, state)
     end
   end
 
@@ -154,5 +167,23 @@ defmodule ExTurso.Connection do
   @impl true
   def handle_deallocate(_query, _cursor, _opts, state) do
     {:error, %Error{message: "cursors are not supported"}, state}
+  end
+
+  defp resolve_secret(fun) when is_function(fun, 0), do: fun.()
+  defp resolve_secret(value), do: value
+
+  defp wrap_error({code, message}) when is_atom(code) and is_binary(message),
+    do: %Error{code: code, message: message}
+
+  defp wrap_error(message) when is_binary(message), do: %Error{message: message}
+
+  defp error_or_disconnect(reason, state) do
+    error = wrap_error(reason)
+
+    if error.code in @disconnect_codes do
+      {:disconnect, error, state}
+    else
+      {:error, error, state}
+    end
   end
 end
