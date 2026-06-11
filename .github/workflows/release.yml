@@ -87,10 +87,16 @@ jobs:
             --transform "s#^#ex_turso-${VERSION}/#" \
             --files-from -
 
-      - name: Publish package to Hex
+      - name: Publish package to hex.pm
         env:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
-        run: mix hex.publish package --yes
+        run: |
+          if [ -z "${HEX_API_KEY}" ]; then
+            echo "::error::HEX_API_KEY secret is required to publish to hex.pm"
+            exit 1
+          fi
+
+          mix hex.publish package --yes
 
       - name: Commit version bump
         run: |
