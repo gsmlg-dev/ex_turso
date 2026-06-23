@@ -25,3 +25,11 @@ ex_turso-*.tar
 # Compiled NIF artifacts copied out of the Rust build.
 /priv/native/
 
+# E2E consumer project build outputs.
+/e2e/_build/
+/e2e/deps/
+/e2e/cover/
+/e2e/tmp/
+
+# Downloaded release artifacts used by the e2e release runner.
+/release-artifacts/

@@ -7,6 +7,11 @@ on:
         description: "Release version to test"
         required: true
         type: string
+      run_cloud_sync:
+        description: "Run Turso Cloud sync tests using repository secrets"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -17,11 +22,12 @@ concurrency:
 
 jobs:
   release-smoke-test:
-    name: Release artifact smoke test
+    name: Release artifact e2e
     runs-on: ubuntu-latest
     env:
       MIX_ENV: test
       VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,9 +53,56 @@ jobs:
             ${{ runner.os }}-cargo-e2e-
             ${{ runner.os }}-cargo-
 
+      - name: Install Mix tooling
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+
+      - name: Run release artifact e2e suite
+        run: ./e2e/scripts/run-release.sh "${VERSION}"
+
+  cloud-sync:
+    name: Release artifact cloud sync e2e
+    if: ${{ inputs.run_cloud_sync }}
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+      VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      TURSO_E2E_DATABASE_URL: ${{ secrets.TURSO_E2E_DATABASE_URL }}
+      TURSO_E2E_AUTH_TOKEN: ${{ secrets.TURSO_E2E_AUTH_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          elixir-version: "1.19"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            release-artifacts/ex_turso-${{ inputs.version }}/native/ex_turso/target
+          key: ${{ runner.os }}-cargo-e2e-cloud-${{ inputs.version }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-e2e-cloud-
+            ${{ runner.os }}-cargo-e2e-
+            ${{ runner.os }}-cargo-
+
+      - name: Install Mix tooling
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+
       - name: Fetch release artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p release-artifacts
           gh release download "v${VERSION}" \
@@ -57,59 +110,7 @@ jobs:
             --dir release-artifacts
           tar -xzf "release-artifacts/ex_turso-${VERSION}-source.tar.gz" -C release-artifacts
 
-      - name: Create consumer test project
-        run: |
-          mkdir -p e2e_consumer/test
-          cat > e2e_consumer/mix.exs <<'EOF'
-          defmodule ExTursoE2E.MixProject do
-            use Mix.Project
-
-            def project do
-              [
-                app: :ex_turso_e2e,
-                version: "0.1.0",
-                elixir: "~> 1.19",
-                deps: deps()
-              ]
-            end
-
-            def application do
-              [extra_applications: [:logger]]
-            end
-
-            defp deps do
-              [{:ex_turso, path: System.fetch_env!("EX_TURSO_PATH")}]
-            end
-          end
-          EOF
-
-          cat > e2e_consumer/test/test_helper.exs <<'EOF'
-          ExUnit.start()
-          EOF
-
-          cat > e2e_consumer/test/ex_turso_e2e_test.exs <<'EOF'
-          defmodule ExTursoE2ETest do
-            use ExUnit.Case
-
-            test "release artifact works from a consumer app" do
-              name = :"e2e_db_#{System.unique_integer([:positive])}"
-              start_supervised!({ExTurso, database: ":memory:", name: name, pool_size: 1})
-
-              assert {:ok, _} = ExTurso.execute(name, "CREATE TABLE items (id INTEGER, name TEXT)")
-              assert {:ok, _} = ExTurso.execute(name, "INSERT INTO items VALUES (?, ?)", [1, "release"])
-
-              assert {:ok, %ExTurso.Result{rows: [%{"name" => "release"}]}} =
-                       ExTurso.query(name, "SELECT name FROM items WHERE id = ?", [1])
-            end
-          end
-          EOF
-
-      - name: Run e2e smoke test
+      - name: Run cloud sync e2e suite
         env:
           EX_TURSO_PATH: ${{ github.workspace }}/release-artifacts/ex_turso-${{ inputs.version }}
-        working-directory: e2e_consumer
-        run: |
-          mix local.hex --force
-          mix local.rebar --force
-          mix deps.get
-          mix test
+        run: ./e2e/scripts/run-cloud-sync.sh
