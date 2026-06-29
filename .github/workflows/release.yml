@@ -81,15 +81,27 @@ jobs:
             ${{ runner.os }}-${{ matrix.job.target }}-cargo-release-
             ${{ runner.os }}-cargo-release-
 
-      - name: Build precompiled NIF
-        id: build_nif
+      - name: Build precompiled NIF with cargo
+        id: build_nif_native
+        if: ${{ !matrix.job.use-cross }}
         uses: philss/rustler-precompiled-action@v1.1.5
         with:
           project-name: ex_turso
           project-version: ${{ env.VERSION }}
           target: ${{ matrix.job.target }}
           nif-version: ${{ matrix.nif }}
-          use-cross: ${{ matrix.job.use-cross || false }}
+          project-dir: native/ex_turso
+
+      - name: Build precompiled NIF with cross
+        id: build_nif_cross
+        if: ${{ matrix.job.use-cross }}
+        uses: philss/rustler-precompiled-action@v1.1.5
+        with:
+          project-name: ex_turso
+          project-version: ${{ env.VERSION }}
+          target: ${{ matrix.job.target }}
+          nif-version: ${{ matrix.nif }}
+          use-cross: true
           cross-version: from-source
           project-dir: native/ex_turso
 
@@ -97,7 +109,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: precompiled-${{ matrix.nif }}-${{ matrix.job.target }}
-          path: ${{ steps.build_nif.outputs.file-path }}
+          path: ${{ steps.build_nif_native.outputs.file-path || steps.build_nif_cross.outputs.file-path }}
           if-no-files-found: error
 
   publish:
