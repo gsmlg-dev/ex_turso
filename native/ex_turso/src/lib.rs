@@ -161,7 +161,12 @@ fn decode_params(params: &[Term]) -> Result<Vec<Value>, NifError> {
 /// Open (or create) a local database file at `path`. `":memory:"` is supported.
 #[rustler::nif(schedule = "DirtyIo")]
 fn open(path: String) -> Result<ResourceArc<DbResource>, NifError> {
-    let result = RT.block_on(async { Builder::new_local(&path).build().await });
+    let result = RT.block_on(async {
+        Builder::new_local(&path)
+            .experimental_index_method(true)
+            .build()
+            .await
+    });
     match result {
         Ok(db) => Ok(ResourceArc::new(DbResource {
             inner: Mutex::new(db),
