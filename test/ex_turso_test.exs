@@ -178,6 +178,20 @@ defmodule ExTursoTest do
     assert abs(distance) < 1.0e-5
   end
 
+  test "full-text search index supports MATCH queries", %{db: db} do
+    {:ok, _} = ExTurso.execute(db, "CREATE TABLE docs (id INTEGER PRIMARY KEY, content TEXT)")
+    {:ok, _} = ExTurso.execute(db, "CREATE INDEX docs_fts ON docs USING fts (content)")
+    {:ok, _} = ExTurso.execute(db, "INSERT INTO docs VALUES (?, ?)", [1, "alpha beta"])
+    {:ok, _} = ExTurso.execute(db, "INSERT INTO docs VALUES (?, ?)", [2, "gamma delta"])
+
+    assert {:ok, %Result{rows: [%{"id" => 1}]}} =
+             ExTurso.query(
+               db,
+               "SELECT id FROM docs WHERE (content) MATCH ? ORDER BY id",
+               ["alpha"]
+             )
+  end
+
   test "sync/2 returns error if database is not configured for sync", %{db: db} do
     assert {:error, %ExTurso.Error{message: "database is not configured for cloud sync"}} =
              ExTurso.sync(db)

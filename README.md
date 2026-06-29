@@ -5,9 +5,9 @@ crate (v0.5) via [Rustler](https://github.com/rusterlium/rustler) NIFs, exposed
 through a [`DBConnection`](https://hexdocs.pm/db_connection) pool.
 
 It supports **local file databases** (and `":memory:"`), **Turso Cloud sync**
-via embedded replicas, and turso's built-in **vector search** SQL functions,
-with correct `ResourceArc` lifetime management and a working connection pool.
-Migrations and an Ecto adapter are out of scope.
+via embedded replicas, and turso's built-in **vector search** and **full-text
+search** SQL features, with correct `ResourceArc` lifetime management and a
+working connection pool. Migrations and an Ecto adapter are out of scope.
 
 ## Requirements
 
@@ -58,6 +58,24 @@ Use `database: ":memory:"` for an in-memory database (one per pool connection).
 
 Always pass values as bound parameters (`?`) rather than interpolating them
 into the SQL string — statements are logged when a query errors.
+
+## Full-text search
+
+ExTurso enables Turso's embedded full-text search index support for local
+databases. Use Turso's FTS index syntax:
+
+```elixir
+{:ok, _} = ExTurso.execute(MyApp.DB, "CREATE TABLE docs (id INTEGER PRIMARY KEY, content TEXT)")
+{:ok, _} = ExTurso.execute(MyApp.DB, "CREATE INDEX docs_fts ON docs USING fts (content)")
+
+{:ok, %ExTurso.Result{rows: rows}} =
+  ExTurso.query(MyApp.DB, "SELECT id FROM docs WHERE (content) MATCH ?", ["search term"])
+```
+
+SQLite's FTS5 virtual table syntax, such as
+`CREATE VIRTUAL TABLE docs_fts USING fts5(content)`, is not exposed by the
+embedded `turso` crate v0.5 API. Use `CREATE INDEX ... USING fts` with `MATCH`
+queries instead.
 
 ## Turso Cloud sync
 
