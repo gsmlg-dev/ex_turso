@@ -16,3 +16,6 @@ turso_core = { version = "0.5", features = ["fts"] }
 rustler = "0.38"
 tokio = { version = "1", features = ["full"] }
 once_cell = "1"
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
