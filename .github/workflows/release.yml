@@ -75,7 +75,6 @@ jobs:
           path: |
             ~/.cargo/git
             ~/.cargo/registry
-            native/ex_turso/target
           key: ${{ runner.os }}-${{ matrix.job.target }}-cargo-release-${{ hashFiles('native/ex_turso/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.job.target }}-cargo-release-
@@ -210,7 +209,6 @@ jobs:
           path: |
             ~/.cargo/git
             ~/.cargo/registry
-            native/ex_turso/target
           key: ${{ runner.os }}-cargo-release-${{ hashFiles('native/ex_turso/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-release-
