@@ -101,7 +101,7 @@ jobs:
           fi
 
           cd native/ex_turso
-          "${tool}" build --target "${TARGET}" --release --locked
+          "${tool}" build --target "${TARGET}" --release
 
           lib_prefix="lib"
           lib_suffix=".so"
