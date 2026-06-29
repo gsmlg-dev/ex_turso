@@ -67,7 +67,7 @@ jobs:
         run: |
           perl -0pi -e "s/version: \"[^\"]+\"/version: \"${VERSION}\"/" mix.exs
           perl -0pi -e "s/^version = \"[^\"]+\"/version = \"${VERSION}\"/m" native/ex_turso/Cargo.toml
-          cargo metadata --manifest-path native/ex_turso/Cargo.toml --format-version 1 > /dev/null
+          perl -0pi -e 's/(name = "ex_turso"\nversion = ")[^"]+"/$1'"${VERSION}"'"/' native/ex_turso/Cargo.lock
 
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
@@ -81,35 +81,60 @@ jobs:
             ${{ runner.os }}-${{ matrix.job.target }}-cargo-release-
             ${{ runner.os }}-cargo-release-
 
-      - name: Build precompiled NIF with cargo
-        id: build_nif_native
-        if: ${{ !matrix.job.use-cross }}
-        uses: philss/rustler-precompiled-action@v1.1.5
-        with:
-          project-name: ex_turso
-          project-version: ${{ env.VERSION }}
-          target: ${{ matrix.job.target }}
-          nif-version: ${{ matrix.nif }}
-          project-dir: native/ex_turso
-
-      - name: Build precompiled NIF with cross
-        id: build_nif_cross
+      - name: Install cross
         if: ${{ matrix.job.use-cross }}
-        uses: philss/rustler-precompiled-action@v1.1.5
-        with:
-          project-name: ex_turso
-          project-version: ${{ env.VERSION }}
-          target: ${{ matrix.job.target }}
-          nif-version: ${{ matrix.nif }}
-          use-cross: true
-          cross-version: from-source
-          project-dir: native/ex_turso
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build and package precompiled NIF
+        id: build_nif
+        shell: bash
+        env:
+          NIF_VERSION: ${{ matrix.nif }}
+          TARGET: ${{ matrix.job.target }}
+          USE_CROSS: ${{ matrix.job.use-cross || false }}
+        run: |
+          set -euo pipefail
+
+          tool="cargo"
+          if [ "${USE_CROSS}" = "true" ]; then
+            tool="cross"
+          fi
+
+          cd native/ex_turso
+          "${tool}" build --target "${TARGET}" --release --locked
+
+          lib_prefix="lib"
+          lib_suffix=".so"
+          final_suffix=".so"
+
+          case "${TARGET}" in
+            *-apple-*)
+              lib_suffix=".dylib"
+              final_suffix=".so"
+              ;;
+            *-pc-windows-*)
+              lib_prefix=""
+              lib_suffix=".dll"
+              final_suffix=".dll"
+              ;;
+          esac
+
+          lib_name="${lib_prefix}ex_turso${lib_suffix}"
+          final_name="${lib_prefix}ex_turso-v${VERSION}-nif-${NIF_VERSION}-${TARGET}${final_suffix}"
+          artifact="${final_name}.tar.gz"
+
+          cd "target/${TARGET}/release"
+          cp "${lib_name}" "${final_name}"
+          tar -czf "${artifact}" "${final_name}"
+          mv "${artifact}" "${GITHUB_WORKSPACE}/"
+
+          echo "file-path=${artifact}" >> "${GITHUB_OUTPUT}"
 
       - name: Upload precompiled NIF artifact
         uses: actions/upload-artifact@v4
         with:
           name: precompiled-${{ matrix.nif }}-${{ matrix.job.target }}
-          path: ${{ steps.build_nif_native.outputs.file-path || steps.build_nif_cross.outputs.file-path }}
+          path: ${{ steps.build_nif.outputs.file-path }}
           if-no-files-found: error
 
   publish:
