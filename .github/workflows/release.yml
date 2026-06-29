@@ -63,6 +63,7 @@ jobs:
           sudo apt-get install --yes pkg-config libssl-dev
 
       - name: Update package version
+        shell: bash
         run: |
           perl -0pi -e "s/version: \"[^\"]+\"/version: \"${VERSION}\"/" mix.exs
           perl -0pi -e "s/^version = \"[^\"]+\"/version = \"${VERSION}\"/m" native/ex_turso/Cargo.toml
@@ -130,6 +131,7 @@ jobs:
           sudo apt-get install --yes pkg-config libssl-dev
 
       - name: Update package version
+        shell: bash
         run: |
           perl -0pi -e "s/version: \"[^\"]+\"/version: \"${VERSION}\"/" mix.exs
           perl -0pi -e "s/^version = \"[^\"]+\"/version = \"${VERSION}\"/m" native/ex_turso/Cargo.toml
