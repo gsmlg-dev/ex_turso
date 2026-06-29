@@ -12,10 +12,20 @@ via embedded replicas, and turso's built-in **vector search** and **full-text
 search** SQL features, with correct `ResourceArc` lifetime management and a
 working connection pool. Migrations and an Ecto adapter are out of scope.
 
-## Requirements
+## Native binaries
 
-A working Rust toolchain (`cargo`) matching your BEAM's architecture is required
-to build the NIF.
+Release builds use precompiled NIFs when available, so most users do not need a
+Rust toolchain. Precompiled binaries are published for:
+
+| OS | Architectures |
+| --- | --- |
+| Linux | `aarch64`, `x86_64` |
+| macOS | `aarch64`, `x86_64` |
+| FreeBSD | `x86_64` |
+| Windows | `x86_64` |
+
+Set `EX_TURSO_BUILD=1` to force a source build. A working Rust toolchain
+(`cargo`) matching your BEAM's architecture is required for source builds.
 
 ## Installation
 

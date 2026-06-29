@@ -26,7 +26,8 @@ defmodule ExTurso.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:rustler, "~> 0.32"},
+      {:rustler_precompiled, "~> 0.9"},
+      {:rustler, "~> 0.38", optional: true},
       {:db_connection, "~> 2.7"}
     ]
   end
@@ -39,6 +40,7 @@ defmodule ExTurso.MixProject do
         ".formatter.exs",
         "lib",
         "mix.exs",
+        "checksum-*.exs",
         "native/ex_turso/Cargo.lock",
         "native/ex_turso/Cargo.toml",
         "native/ex_turso/src",

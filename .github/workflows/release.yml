@@ -21,12 +21,92 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  release:
-    name: Publish Hex package
+  build_precompiled:
+    name: NIF ${{ matrix.nif }} - ${{ matrix.job.target }}
+    runs-on: ${{ matrix.job.os }}
+    env:
+      VERSION: ${{ inputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        nif: ["2.15"]
+        job:
+          - target: aarch64-apple-darwin
+            os: macos-15
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04
+            use-cross: true
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+          - target: x86_64-unknown-freebsd
+            os: ubuntu-22.04
+            use-cross: true
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+    steps:
+      - name: Checkout release ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.job.target }}
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes pkg-config libssl-dev
+
+      - name: Update package version
+        run: |
+          perl -0pi -e "s/version: \"[^\"]+\"/version: \"${VERSION}\"/" mix.exs
+          perl -0pi -e "s/^version = \"[^\"]+\"/version = \"${VERSION}\"/m" native/ex_turso/Cargo.toml
+          cargo metadata --manifest-path native/ex_turso/Cargo.toml --format-version 1 > /dev/null
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            native/ex_turso/target
+          key: ${{ runner.os }}-${{ matrix.job.target }}-cargo-release-${{ hashFiles('native/ex_turso/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.job.target }}-cargo-release-
+            ${{ runner.os }}-cargo-release-
+
+      - name: Build precompiled NIF
+        id: build_nif
+        uses: philss/rustler-precompiled-action@v1.1.5
+        with:
+          project-name: ex_turso
+          project-version: ${{ env.VERSION }}
+          target: ${{ matrix.job.target }}
+          nif-version: ${{ matrix.nif }}
+          use-cross: ${{ matrix.job.use-cross || false }}
+          cross-version: from-source
+          project-dir: native/ex_turso
+
+      - name: Upload precompiled NIF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: precompiled-${{ matrix.nif }}-${{ matrix.job.target }}
+          path: ${{ steps.build_nif.outputs.file-path }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish Hex package and GitHub release
+    needs: build_precompiled
     runs-on: ubuntu-latest
     env:
       MIX_ENV: prod
       VERSION: ${{ inputs.version }}
+      EX_TURSO_BUILD: "1"
     steps:
       - name: Checkout release ref
         uses: actions/checkout@v4
@@ -43,6 +123,36 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes pkg-config libssl-dev
+
+      - name: Update package version
+        run: |
+          perl -0pi -e "s/version: \"[^\"]+\"/version: \"${VERSION}\"/" mix.exs
+          perl -0pi -e "s/^version = \"[^\"]+\"/version = \"${VERSION}\"/m" native/ex_turso/Cargo.toml
+          cargo metadata --manifest-path native/ex_turso/Cargo.toml --format-version 1 > /dev/null
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add mix.exs native/ex_turso/Cargo.toml native/ex_turso/Cargo.lock
+          if git diff --cached --quiet; then
+            echo "No version changes to commit"
+          else
+            git commit -m "chore(release): v${VERSION}"
+          fi
+
+      - name: Create release tag
+        run: git tag "v${VERSION}"
+
+      - name: Push release commit and tag
+        run: |
+          git push origin "HEAD:${{ inputs.git_ref }}"
+          git push origin "v${VERSION}"
 
       - name: Cache Mix dependencies
         uses: actions/cache@v4
@@ -73,19 +183,48 @@ jobs:
           mix local.rebar --force
           mix deps.get
 
-      - name: Update package version
+      - name: Download precompiled NIF artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: precompiled-*
+          path: artifacts/precompiled
+          merge-multiple: true
+
+      - name: Generate release notes
         run: |
-          perl -0pi -e "s/version: \"[^\"]+\"/version: \"${VERSION}\"/" mix.exs
-          perl -0pi -e "s/^version = \"[^\"]+\"/version = \"${VERSION}\"/m" native/ex_turso/Cargo.toml
-          cargo metadata --manifest-path native/ex_turso/Cargo.toml --format-version 1 > /dev/null
+          previous_tag="$(git describe --tags --abbrev=0 "v${VERSION}^" 2>/dev/null || true)"
+          if [ -n "$previous_tag" ]; then
+            git log --pretty=format:"- %s (%h)" "${previous_tag}..v${VERSION}" > release-notes.md
+          else
+            git log --pretty=format:"- %s (%h)" "v${VERSION}" > release-notes.md
+          fi
+
+      - name: Create or update GitHub release with precompiled NIFs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            gh release edit "v${VERSION}" --notes-file release-notes.md --latest
+          else
+            gh release create "v${VERSION}" --verify-tag --notes-file release-notes.md --latest
+          fi
+
+          gh release upload "v${VERSION}" artifacts/precompiled/*.tar.gz --clobber
+
+      - name: Generate precompiled checksums
+        run: mix rustler_precompiled.download ExTurso.Native --all --print
 
       - name: Build package artifacts
         run: |
           mkdir -p artifacts
           mix hex.build --output "artifacts/ex_turso-${VERSION}.tar"
-          git ls-files -z | tar --null -czf "artifacts/ex_turso-${VERSION}-source.tar.gz" \
+
+          tmp_files="$(mktemp)"
+          git ls-files -z > "$tmp_files"
+          find . -maxdepth 1 -name 'checksum-*.exs' -printf '%P\0' >> "$tmp_files"
+          tar --null -czf "artifacts/ex_turso-${VERSION}-source.tar.gz" \
             --transform "s#^#ex_turso-${VERSION}/#" \
-            --files-from -
+            --files-from "$tmp_files"
 
       - name: Publish package to hex.pm
         env:
@@ -98,31 +237,11 @@ jobs:
 
           mix hex.publish package --yes
 
-      - name: Commit version bump
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add mix.exs native/ex_turso/Cargo.toml native/ex_turso/Cargo.lock
-          git commit -m "chore(release): v${VERSION}"
-
-      - name: Create release tag
-        run: git tag "v${VERSION}"
-
-      - name: Push release commit and tag
-        run: |
-          git push origin "HEAD:${{ inputs.git_ref }}"
-          git push origin "v${VERSION}"
-
-      - name: Generate release notes
-        run: |
-          previous_tag="$(git describe --tags --abbrev=0 "v${VERSION}^" 2>/dev/null || true)"
-          if [ -n "$previous_tag" ]; then
-            git log --pretty=format:"- %s (%h)" "${previous_tag}..v${VERSION}" > release-notes.md
-          else
-            git log --pretty=format:"- %s (%h)" "v${VERSION}" > release-notes.md
-          fi
-
-      - name: Create GitHub Release
+      - name: Upload package artifacts to GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "v${VERSION}" artifacts/* --notes-file release-notes.md
+        run: |
+          gh release upload "v${VERSION}" \
+            "artifacts/ex_turso-${VERSION}.tar" \
+            "artifacts/ex_turso-${VERSION}-source.tar.gz" \
+            --clobber

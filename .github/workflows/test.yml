@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       MIX_ENV: test
+      EX_TURSO_BUILD: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,6 +34,11 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes pkg-config libssl-dev
 
       - name: Cache Mix dependencies
         uses: actions/cache@v4

@@ -11,7 +11,23 @@ defmodule ExTurso.Native do
   and `reason` is a string.
   """
 
-  use Rustler, otp_app: :ex_turso, crate: "ex_turso"
+  version = Mix.Project.config()[:version]
+
+  use RustlerPrecompiled,
+    otp_app: :ex_turso,
+    crate: "ex_turso",
+    base_url: "https://github.com/gsmlg-dev/ex_turso/releases/download/v#{version}",
+    force_build: System.get_env("EX_TURSO_BUILD") in ["1", "true"],
+    targets: ~w(
+      aarch64-apple-darwin
+      aarch64-unknown-linux-gnu
+      x86_64-apple-darwin
+      x86_64-pc-windows-msvc
+      x86_64-unknown-freebsd
+      x86_64-unknown-linux-gnu
+    ),
+    nif_versions: ["2.15"],
+    version: version
 
   @typedoc "Error tuple returned by every NIF: an error-class atom plus a message."
   @type nif_error :: {ExTurso.Error.code(), String.t()}
