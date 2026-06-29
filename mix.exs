@@ -7,7 +7,7 @@ defmodule ExTurso.MixProject do
     [
       app: :ex_turso,
       version: "0.1.1",
-      elixir: "~> 1.19",
+      elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       description: "DBConnection-backed Elixir wrapper for Turso/libSQL via Rustler",
       source_url: @source_url,
