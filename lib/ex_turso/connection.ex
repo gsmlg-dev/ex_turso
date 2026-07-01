@@ -74,7 +74,7 @@ defmodule ExTurso.Connection do
 
   @impl true
   def ping(%__MODULE__{conn: conn} = state) do
-    case Native.query(conn, "SELECT 1", []) do
+    case Native.query_rows(conn, "SELECT 1", []) do
       {:ok, _} -> {:ok, state}
       {:error, reason} -> {:disconnect, wrap_error(reason), state}
     end
@@ -126,9 +126,21 @@ defmodule ExTurso.Connection do
 
   @impl true
   def handle_execute(%Query{command: :query, statement: sql} = query, params, _opts, state) do
-    case Native.query(state.conn, sql, params) do
-      {:ok, rows} ->
-        {:ok, query, %Result{rows: rows, num_rows: length(rows)}, state}
+    case Native.query_rows(state.conn, sql, params) do
+      {:ok, {columns, rows}} ->
+        map_rows = Enum.map(rows, &Map.new(Enum.zip(columns, &1)))
+        {:ok, query, %Result{columns: columns, rows: map_rows, num_rows: length(rows)}, state}
+
+      {:error, reason} ->
+        error_or_disconnect(reason, state)
+    end
+  end
+
+  @impl true
+  def handle_execute(%Query{command: :query_rows, statement: sql} = query, params, _opts, state) do
+    case Native.query_rows(state.conn, sql, params) do
+      {:ok, {columns, rows}} ->
+        {:ok, query, %Result{columns: columns, rows: rows, num_rows: length(rows)}, state}
 
       {:error, reason} ->
         error_or_disconnect(reason, state)

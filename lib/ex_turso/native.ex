@@ -45,6 +45,11 @@ defmodule ExTurso.Native do
           {:ok, [map()]} | {:error, nif_error()}
   def query(_conn, _sql, _params), do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc "Run a query, returning ordered column names and ordered row values."
+  @spec query_rows(reference(), String.t(), list()) ::
+          {:ok, {[String.t()], [[term()]]}} | {:error, nif_error()}
+  def query_rows(_conn, _sql, _params), do: :erlang.nif_error(:nif_not_loaded)
+
   @doc "Execute a statement, returning the number of affected rows."
   @spec execute(reference(), String.t(), list()) ::
           {:ok, non_neg_integer()} | {:error, nif_error()}

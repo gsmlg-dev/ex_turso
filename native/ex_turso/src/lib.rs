@@ -21,6 +21,7 @@ mod atoms {
         misuse,
         invalid_param,
         error,
+        blob,
     }
 }
 
@@ -119,6 +120,12 @@ impl From<Value> for SqlValue {
 /// Any other term is rejected so unsupported parameters fail loudly instead
 /// of silently binding `NULL`.
 fn term_to_value(term: &Term, index: usize) -> Result<Value, NifError> {
+    if let Ok((tag, bin)) = term.decode::<(Atom, rustler::Binary)>() {
+        if tag == atoms::blob() {
+            return Ok(Value::Blob(bin.as_slice().to_vec()));
+        }
+    }
+
     if let Ok(name) = term.atom_to_string() {
         return match name.as_str() {
             "nil" => Ok(Value::Null),
@@ -156,6 +163,31 @@ fn decode_params(params: &[Term]) -> Result<Vec<Value>, NifError> {
         .enumerate()
         .map(|(index, term)| term_to_value(term, index))
         .collect()
+}
+
+fn fetch_rows(
+    conn: ResourceArc<ConnResource>,
+    sql: String,
+    values: Vec<Value>,
+) -> Result<(Vec<String>, Vec<Vec<SqlValue>>), NifError> {
+    let guard = conn.inner.lock().map_err(internal_error)?;
+
+    RT.block_on(async {
+        let mut rows = guard.query(&sql, values).await.map_err(classify)?;
+        let columns = rows.column_names();
+        let mut acc = Vec::new();
+
+        while let Some(row) = rows.next().await.map_err(classify)? {
+            let mut values = Vec::with_capacity(columns.len());
+            for idx in 0..columns.len() {
+                let value = row.get_value(idx).map_err(classify)?;
+                values.push(SqlValue::from(value));
+            }
+            acc.push(values);
+        }
+
+        Ok::<_, NifError>((columns, acc))
+    })
 }
 
 /// Open (or create) a local database file at `path`. `":memory:"` is supported.
@@ -246,26 +278,25 @@ fn query<'a>(
     params: Vec<Term<'a>>,
 ) -> Result<Term<'a>, NifError> {
     let values = decode_params(&params)?;
-    let guard = conn.inner.lock().map_err(internal_error)?;
+    let (columns, rows) = fetch_rows(conn, sql, values)?;
 
-    let rows: Vec<HashMap<String, SqlValue>> = RT.block_on(async {
-        let mut rows = guard.query(&sql, values).await.map_err(classify)?;
-        let columns = rows.column_names();
-        let mut acc = Vec::new();
-
-        while let Some(row) = rows.next().await.map_err(classify)? {
-            let mut map = HashMap::with_capacity(columns.len());
-            for (idx, name) in columns.iter().enumerate() {
-                let value = row.get_value(idx).map_err(classify)?;
-                map.insert(name.clone(), SqlValue::from(value));
-            }
-            acc.push(map);
-        }
-
-        Ok::<_, NifError>(acc)
-    })?;
+    let rows: Vec<HashMap<String, SqlValue>> = rows
+        .into_iter()
+        .map(|row| columns.iter().cloned().zip(row).collect())
+        .collect();
 
     Ok(rows.encode(env))
+}
+
+/// Run a query and return ordered column names plus ordered row values.
+#[rustler::nif(schedule = "DirtyIo")]
+fn query_rows<'a>(
+    conn: ResourceArc<ConnResource>,
+    sql: String,
+    params: Vec<Term<'a>>,
+) -> Result<(Vec<String>, Vec<Vec<SqlValue>>), NifError> {
+    let values = decode_params(&params)?;
+    fetch_rows(conn, sql, values)
 }
 
 /// Execute a statement and return the number of affected rows.

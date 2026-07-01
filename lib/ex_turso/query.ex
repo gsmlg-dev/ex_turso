@@ -4,20 +4,22 @@ defmodule ExTurso.Query do
 
   `command` selects which NIF runs the statement:
 
-    * `:query` — returns rows (via `ExTurso.Native.query/3`)
+    * `:query` — returns rows as maps (via `ExTurso.Native.query_rows/3`)
+    * `:query_rows` — returns ordered columns and row values for Ecto
     * `:execute` — returns the affected-row count (via `ExTurso.Native.execute/3`)
     * `:sync` — triggers replica sync (via `ExTurso.Native.sync/1`); the
       statement text is ignored
   """
 
-  @type command :: :query | :execute | :sync
+  @type command :: :query | :query_rows | :execute | :sync
 
   @type t :: %__MODULE__{
+          name: String.t(),
           statement: String.t(),
           command: command()
         }
 
-  defstruct statement: nil, command: :query
+  defstruct name: "", statement: nil, command: :query
 end
 
 defimpl DBConnection.Query, for: ExTurso.Query do

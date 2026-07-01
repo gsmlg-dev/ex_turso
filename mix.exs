@@ -28,7 +28,9 @@ defmodule ExTurso.MixProject do
     [
       {:rustler_precompiled, "~> 0.9"},
       {:rustler, "~> 0.38", optional: true},
-      {:db_connection, "~> 2.7"}
+      {:db_connection, "~> 2.7"},
+      {:ecto_sql, "~> 3.14", optional: true},
+      {:jason, "~> 1.4", optional: true}
     ]
   end
 
@@ -45,7 +47,8 @@ defmodule ExTurso.MixProject do
         "native/ex_turso/Cargo.toml",
         "native/ex_turso/src",
         "README.md",
-        "LICENSE"
+        "LICENSE",
+        "THIRD_PARTY_NOTICES.md"
       ],
       links: %{"GitHub" => @source_url}
     ]

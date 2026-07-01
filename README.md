@@ -10,7 +10,7 @@ through a [`DBConnection`](https://hexdocs.pm/db_connection) pool.
 It supports **local file databases** (and `":memory:"`), **Turso Cloud sync**
 via embedded replicas, and turso's built-in **vector search** and **full-text
 search** SQL features, with correct `ResourceArc` lifetime management and a
-working connection pool. Migrations and an Ecto adapter are out of scope.
+working connection pool. Ecto support is optional via `Ecto.Adapters.Turso`.
 
 ## Native binaries
 
@@ -32,7 +32,7 @@ Set `EX_TURSO_BUILD=1` to force a source build. A working Rust toolchain
 ```elixir
 def deps do
   [
-    {:ex_turso, "~> 0.1.0"}
+    {:ex_turso, "~> 0.2.0"}
   ]
 end
 ```
@@ -71,6 +71,42 @@ Use `database: ":memory:"` for an in-memory database (one per pool connection).
 
 Always pass values as bound parameters (`?`) rather than interpolating them
 into the SQL string — statements are logged when a query errors.
+
+## Ecto
+
+`ExTurso` includes an optional SQL adapter for Ecto. Add `ecto_sql` in the
+application that uses Ecto:
+
+```elixir
+def deps do
+  [
+    {:ex_turso, "~> 0.2.0"},
+    {:ecto_sql, "~> 3.14"}
+  ]
+end
+```
+
+Define your repo with `Ecto.Adapters.Turso`:
+
+```elixir
+defmodule MyApp.Repo do
+  use Ecto.Repo,
+    otp_app: :my_app,
+    adapter: Ecto.Adapters.Turso
+end
+```
+
+Configure it with the same database options used by `ExTurso`:
+
+```elixir
+config :my_app, MyApp.Repo,
+  database: "my_app.db",
+  pool_size: 5
+```
+
+The adapter supports regular `Ecto.Repo` schema/query operations and
+`ecto_sql` migrations using Turso's SQLite-compatible SQL dialect. Streaming
+and multi-result queries are not supported by the current native connection.
 
 ## Full-text search
 
@@ -133,4 +169,5 @@ drops it and opens a fresh one.
 | NIF decls | `ExTurso.Native` | Loads the compiled NIF |
 | Pooling | `ExTurso.Connection` | `DBConnection` behaviour implementation |
 | Query | `ExTurso.Query` | Statement struct + `DBConnection.Query` protocol |
+| Ecto | `Ecto.Adapters.Turso` | Optional `ecto_sql` adapter |
 | Public API | `ExTurso` | `start_link/1`, `child_spec/1`, `query/3`, `execute/3` |
