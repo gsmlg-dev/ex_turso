@@ -26,8 +26,8 @@ defmodule ExTurso.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:rustler_precompiled, "~> 0.9"},
-      {:rustler, "~> 0.38", optional: true},
+      {:rustler_precompiled, "~> 0.9", runtime: false},
+      {:rustler, "~> 0.38", optional: true, runtime: false},
       {:db_connection, "~> 2.7"},
       {:ecto_sql, "~> 3.14", optional: true},
       {:jason, "~> 1.4", optional: true}
