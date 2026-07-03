@@ -1688,8 +1688,17 @@ if Code.ensure_loaded?(Ecto.Adapters.SQL.Connection) do
 
     defp check_expr(nil), do: []
 
+    defp check_expr(expr) when is_binary(expr),
+      do: [" CHECK (", expr, ")"]
+
     defp check_expr(%{name: name, expr: expr}),
       do: [" CONSTRAINT ", name, " CHECK (", expr, ")"]
+
+    defp check_expr(opts) when is_list(opts) do
+      name = Keyword.fetch!(opts, :name)
+      expr = Keyword.fetch!(opts, :expr)
+      [" CONSTRAINT ", name, " CHECK (", expr, ")"]
+    end
 
     defp collate_expr(nil), do: []
 

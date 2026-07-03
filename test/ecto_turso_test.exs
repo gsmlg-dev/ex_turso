@@ -28,6 +28,7 @@ defmodule ExTurso.EctoTursoTest do
 
   import Ecto.Query
 
+  alias Ecto.Migration.Table
   alias ExTurso.{EctoRepo, EctoUser}
 
   setup do
@@ -111,5 +112,58 @@ defmodule ExTurso.EctoTursoTest do
              end)
 
     assert EctoRepo.aggregate(EctoUser, :count) == 0
+  end
+
+  test "migration DDL supports string check constraints" do
+    [create_sql] =
+      Ecto.Adapters.Turso.Connection.execute_ddl(
+        {:create, %Table{name: "checked_users"},
+         [
+           {:add, :role, :string,
+            [
+              null: false,
+              default: "user",
+              check: "role in ('admin', 'user')"
+            ]}
+         ]}
+      )
+
+    create_sql = IO.iodata_to_binary(create_sql)
+
+    assert create_sql =~
+             ~S|"role" TEXT DEFAULT 'user' NOT NULL CHECK (role in ('admin', 'user'))|
+
+    EctoRepo.query!(create_sql)
+    EctoRepo.query!("INSERT INTO checked_users (role) VALUES (?)", ["admin"])
+
+    assert_raise ExTurso.Error, ~r/CHECK constraint failed/, fn ->
+      EctoRepo.query!("INSERT INTO checked_users (role) VALUES (?)", ["guest"])
+    end
+  end
+
+  test "migration DDL supports named check constraints during create table" do
+    [create_sql] =
+      Ecto.Adapters.Turso.Connection.execute_ddl(
+        {:create, %Table{name: "named_checked_users"},
+         [
+           {:add, :role, :string,
+            [
+              null: false,
+              default: "user",
+              check: %{name: "users_role_check", expr: "role in ('admin', 'user')"}
+            ]}
+         ]}
+      )
+
+    create_sql = IO.iodata_to_binary(create_sql)
+
+    assert create_sql =~
+             ~S|CONSTRAINT users_role_check CHECK (role in ('admin', 'user'))|
+
+    EctoRepo.query!(create_sql)
+
+    assert_raise ExTurso.Error, ~r/CHECK constraint failed/, fn ->
+      EctoRepo.query!("INSERT INTO named_checked_users (role) VALUES (?)", ["guest"])
+    end
   end
 end
