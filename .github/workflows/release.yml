@@ -249,12 +249,19 @@ jobs:
           gh release upload "v${VERSION}" artifacts/precompiled/*.tar.gz --clobber
 
       - name: Generate precompiled checksums
-        run: mix rustler_precompiled.download ExTurso.Native --all --print
+        run: |
+          mix deps.compile rustler_precompiled
+          mix rustler_precompiled.download ExTurso.Native --all --print
+          test -s checksum-Elixir.ExTurso.Native.exs
+          grep -q "x86_64-unknown-linux-gnu" checksum-Elixir.ExTurso.Native.exs
 
       - name: Build package artifacts
         run: |
           mkdir -p artifacts
           mix hex.build --output "artifacts/ex_turso-${VERSION}.tar"
+          tar -xOf "artifacts/ex_turso-${VERSION}.tar" contents.tar.gz \
+            | tar -tzf - \
+            | grep -q '^checksum-Elixir\.ExTurso\.Native\.exs$'
 
           tmp_files="$(mktemp)"
           git ls-files -z > "$tmp_files"
