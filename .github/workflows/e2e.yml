@@ -41,6 +41,22 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes pkg-config libssl-dev
+
+      - name: Cache E2E Mix dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            e2e/deps
+            e2e/_build
+          key: ${{ runner.os }}-mix-e2e-${{ inputs.version }}-${{ hashFiles('e2e/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-e2e-${{ inputs.version }}-
+            ${{ runner.os }}-mix-e2e-
+
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
         with:
@@ -58,8 +74,18 @@ jobs:
           mix local.hex --force
           mix local.rebar --force
 
+      - name: Fetch release artifact
+        run: |
+          mkdir -p release-artifacts
+          gh release download "v${VERSION}" \
+            --pattern "ex_turso-${VERSION}-source.tar.gz" \
+            --dir release-artifacts
+          tar -xzf "release-artifacts/ex_turso-${VERSION}-source.tar.gz" -C release-artifacts
+
       - name: Run release artifact e2e suite
-        run: ./e2e/scripts/run-release.sh "${VERSION}"
+        env:
+          EX_TURSO_PATH: ${{ github.workspace }}/release-artifacts/ex_turso-${{ inputs.version }}
+        run: ./e2e/scripts/run-local.sh
 
   cloud-sync:
     name: Release artifact cloud sync e2e
@@ -83,6 +109,23 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes pkg-config libssl-dev
+
+      - name: Cache E2E Mix dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            e2e/deps
+            e2e/_build
+          key: ${{ runner.os }}-mix-e2e-cloud-${{ inputs.version }}-${{ hashFiles('e2e/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-e2e-cloud-${{ inputs.version }}-
+            ${{ runner.os }}-mix-e2e-cloud-
+            ${{ runner.os }}-mix-e2e-
 
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
