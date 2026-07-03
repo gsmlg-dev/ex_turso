@@ -24,8 +24,16 @@ Rust toolchain. Precompiled binaries are published for:
 | FreeBSD | `x86_64` |
 | Windows | `x86_64` |
 
-Set `EX_TURSO_BUILD=1` to force a source build. A working Rust toolchain
-(`cargo`) matching your BEAM's architecture is required for source builds.
+Set `EX_TURSO_BUILD=1` to force a source build. Network-restricted builders can
+also use compile-time Mix config:
+
+```elixir
+config :rustler_precompiled, :force_build, ex_turso: true
+```
+
+A working Rust toolchain (`cargo`) matching your BEAM's architecture is required
+for source builds. Applications that force source builds should also add
+`{:rustler, "~> 0.38", runtime: false}` to their dependencies.
 
 ## Installation
 
