@@ -1,6 +1,12 @@
 name: E2E
 
 on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       version:
@@ -21,8 +27,65 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  local-e2e:
+    name: Local package e2e
+    if: ${{ github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+      EX_TURSO_BUILD: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Erlang and Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          elixir-version: "1.19"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes pkg-config libssl-dev
+
+      - name: Cache E2E Mix dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            e2e/deps
+            e2e/_build
+          key: ${{ runner.os }}-mix-e2e-local-${{ hashFiles('e2e/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-e2e-local-
+            ${{ runner.os }}-mix-e2e-
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            native/ex_turso/target
+          key: ${{ runner.os }}-cargo-e2e-local-${{ hashFiles('native/ex_turso/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-e2e-local-
+            ${{ runner.os }}-cargo-
+
+      - name: Install Mix tooling
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+
+      - name: Run local e2e suite
+        run: ./e2e/scripts/run-local.sh
+
   release-smoke-test:
     name: Release artifact e2e
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     env:
       MIX_ENV: test
@@ -89,7 +152,7 @@ jobs:
 
   cloud-sync:
     name: Release artifact cloud sync e2e
-    if: ${{ inputs.run_cloud_sync }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_cloud_sync }}
     runs-on: ubuntu-latest
     env:
       MIX_ENV: test
