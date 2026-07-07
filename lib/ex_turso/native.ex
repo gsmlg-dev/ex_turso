@@ -75,4 +75,12 @@ defmodule ExTurso.Native do
   @doc "Flush and release a connection. Returns `:ok`."
   @spec close(reference()) :: :ok
   def close(_conn), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc "Release a local database handle. Returns `:ok`."
+  @spec close_db(reference()) :: :ok
+  def close_db(_db), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc "Release a synced database handle. Returns `:ok`."
+  @spec close_sync_db(reference()) :: :ok
+  def close_sync_db(_db), do: :erlang.nif_error(:nif_not_loaded)
 end

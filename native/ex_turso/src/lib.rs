@@ -53,7 +53,7 @@ static RT: Lazy<Runtime> = Lazy::new(|| Runtime::new().expect("failed to start T
 
 /// Resource wrapping an open `turso::Database`.
 struct DbResource {
-    inner: Mutex<Database>,
+    inner: Mutex<Option<Database>>,
 }
 
 #[rustler::resource_impl]
@@ -61,7 +61,7 @@ impl rustler::Resource for DbResource {}
 
 /// Resource wrapping a `turso::Connection`.
 struct ConnResource {
-    inner: Mutex<Connection>,
+    inner: Mutex<Option<Connection>>,
 }
 
 #[rustler::resource_impl]
@@ -69,7 +69,7 @@ impl rustler::Resource for ConnResource {}
 
 /// Resource wrapping an open `turso::sync::Database`.
 struct SyncDbResource {
-    inner: Mutex<turso::sync::Database>,
+    inner: Mutex<Option<turso::sync::Database>>,
 }
 
 #[rustler::resource_impl]
@@ -171,9 +171,12 @@ fn fetch_rows(
     values: Vec<Value>,
 ) -> Result<(Vec<String>, Vec<Vec<SqlValue>>), NifError> {
     let guard = conn.inner.lock().map_err(internal_error)?;
+    let conn = guard
+        .as_ref()
+        .ok_or_else(|| internal_error("connection is closed"))?;
 
     RT.block_on(async {
-        let mut rows = guard.query(&sql, values).await.map_err(classify)?;
+        let mut rows = conn.query(&sql, values).await.map_err(classify)?;
         let columns = rows.column_names();
         let mut acc = Vec::new();
 
@@ -201,7 +204,7 @@ fn open(path: String) -> Result<ResourceArc<DbResource>, NifError> {
     });
     match result {
         Ok(db) => Ok(ResourceArc::new(DbResource {
-            inner: Mutex::new(db),
+            inner: Mutex::new(Some(db)),
         })),
         Err(e) => Err(classify(e)),
     }
@@ -211,9 +214,13 @@ fn open(path: String) -> Result<ResourceArc<DbResource>, NifError> {
 #[rustler::nif(schedule = "DirtyIo")]
 fn connect(db: ResourceArc<DbResource>) -> Result<ResourceArc<ConnResource>, NifError> {
     let guard = db.inner.lock().map_err(internal_error)?;
-    match guard.connect() {
+    let db = guard
+        .as_ref()
+        .ok_or_else(|| internal_error("database is closed"))?;
+
+    match db.connect() {
         Ok(conn) => Ok(ResourceArc::new(ConnResource {
-            inner: Mutex::new(conn),
+            inner: Mutex::new(Some(conn)),
         })),
         Err(e) => Err(classify(e)),
     }
@@ -235,7 +242,7 @@ fn open_sync(
     });
     match result {
         Ok(db) => Ok(ResourceArc::new(SyncDbResource {
-            inner: Mutex::new(db),
+            inner: Mutex::new(Some(db)),
         })),
         Err(e) => Err(classify(e)),
     }
@@ -246,11 +253,14 @@ fn open_sync(
 fn connect_sync(db: ResourceArc<SyncDbResource>) -> Result<ResourceArc<ConnResource>, NifError> {
     let db_clone = {
         let guard = db.inner.lock().map_err(internal_error)?;
-        guard.clone()
+        guard
+            .as_ref()
+            .ok_or_else(|| internal_error("database is closed"))?
+            .clone()
     };
     let conn = RT.block_on(async { db_clone.connect().await.map_err(classify) })?;
     Ok(ResourceArc::new(ConnResource {
-        inner: Mutex::new(conn),
+        inner: Mutex::new(Some(conn)),
     }))
 }
 
@@ -259,7 +269,10 @@ fn connect_sync(db: ResourceArc<SyncDbResource>) -> Result<ResourceArc<ConnResou
 fn sync(db: ResourceArc<SyncDbResource>) -> Result<Atom, NifError> {
     let db_clone = {
         let guard = db.inner.lock().map_err(internal_error)?;
-        guard.clone()
+        guard
+            .as_ref()
+            .ok_or_else(|| internal_error("database is closed"))?
+            .clone()
     };
     RT.block_on(async {
         db_clone.pull().await.map_err(classify)?;
@@ -308,15 +321,39 @@ fn execute<'a>(
 ) -> Result<u64, NifError> {
     let values = decode_params(&params)?;
     let guard = conn.inner.lock().map_err(internal_error)?;
-    RT.block_on(async { guard.execute(&sql, values).await.map_err(classify) })
+    let conn = guard
+        .as_ref()
+        .ok_or_else(|| internal_error("connection is closed"))?;
+
+    RT.block_on(async { conn.execute(&sql, values).await.map_err(classify) })
 }
 
 /// Close a connection. turso closes the underlying connection when the resource
 /// is dropped, so this releases held buffers best-effort and returns `:ok`.
 #[rustler::nif(schedule = "DirtyIo")]
 fn close(conn: ResourceArc<ConnResource>) -> rustler::types::atom::Atom {
-    if let Ok(guard) = conn.inner.lock() {
-        let _ = guard.cacheflush();
+    if let Ok(mut guard) = conn.inner.lock() {
+        if let Some(conn) = guard.take() {
+            let _ = conn.cacheflush();
+        }
+    }
+    atoms::ok()
+}
+
+/// Close a local database handle by dropping the resource contents eagerly.
+#[rustler::nif(schedule = "DirtyIo")]
+fn close_db(db: ResourceArc<DbResource>) -> rustler::types::atom::Atom {
+    if let Ok(mut guard) = db.inner.lock() {
+        let _ = guard.take();
+    }
+    atoms::ok()
+}
+
+/// Close a synced database handle by dropping the resource contents eagerly.
+#[rustler::nif(schedule = "DirtyIo")]
+fn close_sync_db(db: ResourceArc<SyncDbResource>) -> rustler::types::atom::Atom {
+    if let Ok(mut guard) = db.inner.lock() {
+        let _ = guard.take();
     }
     atoms::ok()
 }

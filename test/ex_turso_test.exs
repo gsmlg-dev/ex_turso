@@ -87,6 +87,32 @@ defmodule ExTursoTest do
     assert {:ok, ^state} = ExTurso.Connection.ping(state)
   end
 
+  @tag :tmp_dir
+  test "disconnect/2 releases native connection and database handles", %{tmp_dir: tmp_dir} do
+    db_path = Path.join(tmp_dir, "disconnect_releases_handles.db")
+
+    assert {:ok, state} = ExTurso.Connection.connect(database: db_path)
+    assert {:ok, _} = ExTurso.Native.execute(state.conn, "CREATE TABLE released (id INTEGER)", [])
+
+    assert :ok = ExTurso.Connection.disconnect(:normal, state)
+
+    assert {:error, {:error, "connection is closed"}} =
+             ExTurso.Native.query_rows(state.conn, "SELECT 1", [])
+
+    assert {:error, {:error, "database is closed"}} = ExTurso.Native.connect(state.db)
+
+    assert {:ok, reopened} = ExTurso.Connection.connect(database: db_path)
+
+    assert {:ok, {["count"], [[1]]}} =
+             ExTurso.Native.query_rows(
+               reopened.conn,
+               "SELECT COUNT(*) AS count FROM sqlite_schema WHERE name = 'released'",
+               []
+             )
+
+    assert :ok = ExTurso.Connection.disconnect(:normal, reopened)
+  end
+
   test "status changes between idle and transaction", %{db: db} do
     assert :idle = DBConnection.status(db)
 

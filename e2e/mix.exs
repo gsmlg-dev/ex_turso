@@ -18,9 +18,26 @@ defmodule ExTursoE2E.MixProject do
   end
 
   defp deps do
-    case System.get_env("EX_TURSO_VERSION") do
-      nil -> [{:ex_turso, path: ex_turso_path()}]
-      version -> [{:ex_turso, "== #{version}"}]
+    ex_turso_dep =
+      case System.get_env("EX_TURSO_VERSION") do
+        nil -> {:ex_turso, path: ex_turso_path()}
+        version -> {:ex_turso, "== #{version}"}
+      end
+
+    rustler_dep =
+      if force_native_build?() do
+        [{:rustler, "~> 0.38", runtime: false}]
+      else
+        []
+      end
+
+    [ex_turso_dep | rustler_dep]
+  end
+
+  defp force_native_build? do
+    case System.get_env("EX_TURSO_BUILD") do
+      value when value in ["1", "true"] -> true
+      _value -> false
     end
   end
 

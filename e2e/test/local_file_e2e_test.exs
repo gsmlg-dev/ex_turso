@@ -21,6 +21,29 @@ defmodule ExTursoE2E.LocalFileTest do
              ExTurso.query(reopened, "SELECT name FROM people WHERE id = ?", [1])
   end
 
+  test "file database reopens after forced same-pool disconnects", %{tmp_dir: tmp_dir} do
+    db_path = Path.join(tmp_dir, "reconnect.db")
+    {db, _pid} = Support.start_pool!(database: db_path, pool_size: 1)
+
+    Support.execute!(db, "CREATE TABLE events (id INTEGER PRIMARY KEY, payload TEXT NOT NULL)")
+
+    for cycle <- 1..3 do
+      first_id = (cycle - 1) * 50 + 1
+
+      for id <- first_id..(first_id + 49) do
+        Support.execute!(db, "INSERT INTO events VALUES (?, ?)", [
+          id,
+          String.duplicate("wal-payload-#{cycle}-", 256)
+        ])
+      end
+
+      DBConnection.disconnect_all(db, 0)
+
+      assert %{"count" => count} = Support.query_one!(db, "SELECT COUNT(*) AS count FROM events")
+      assert count == cycle * 50
+    end
+  end
+
   test "separate in-memory pools do not share state" do
     {left, _pid} = Support.start_pool!(database: ":memory:", pool_size: 1)
     {right, _pid} = Support.start_pool!(database: ":memory:", pool_size: 1)

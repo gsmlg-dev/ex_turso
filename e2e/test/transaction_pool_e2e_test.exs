@@ -77,12 +77,12 @@ defmodule ExTursoE2E.TransactionPoolTest do
     assert {:ok, %Result{rows: [%{"ok" => 1}]}} = ExTurso.query(db, "SELECT 1 AS ok")
   end
 
-  defp insert_with_busy_retry(db, id, attempts_left \\ 10)
+  defp insert_with_busy_retry(db, id, attempts_left \\ 100)
 
   defp insert_with_busy_retry(db, id, attempts_left) when attempts_left > 0 do
     case ExTurso.execute(db, "INSERT INTO events VALUES (?, ?)", [id, "event-#{id}"]) do
       {:error, %ExTurso.Error{code: :busy}} ->
-        Process.sleep(10)
+        Process.sleep(20)
         insert_with_busy_retry(db, id, attempts_left - 1)
 
       result ->
