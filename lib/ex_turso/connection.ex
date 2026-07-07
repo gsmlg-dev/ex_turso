@@ -64,8 +64,9 @@ defmodule ExTurso.Connection do
   end
 
   @impl true
-  def disconnect(_err, %__MODULE__{conn: conn}) do
-    Native.close(conn)
+  def disconnect(_err, %__MODULE__{} = state) do
+    close_conn(state.conn)
+    close_db(state)
     :ok
   end
 
@@ -183,6 +184,15 @@ defmodule ExTurso.Connection do
 
   defp resolve_secret(fun) when is_function(fun, 0), do: fun.()
   defp resolve_secret(value), do: value
+
+  defp close_conn(conn) when is_reference(conn), do: Native.close(conn)
+  defp close_conn(_conn), do: :ok
+
+  defp close_db(%__MODULE__{sync_db: sync_db}) when is_reference(sync_db),
+    do: Native.close_sync_db(sync_db)
+
+  defp close_db(%__MODULE__{db: db}) when is_reference(db), do: Native.close_db(db)
+  defp close_db(_state), do: :ok
 
   defp wrap_error({code, message}) when is_atom(code) and is_binary(message),
     do: %Error{code: code, message: message}
