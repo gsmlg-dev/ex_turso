@@ -137,15 +137,17 @@ jobs:
           if-no-files-found: error
 
   build_static_archive:
-    name: Static NIF archive - ${{ matrix.target }}
+    name: Static NIF archive - ${{ matrix.job.target }}
     runs-on: ubuntu-22.04
     env:
       VERSION: ${{ inputs.version }}
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - x86_64-unknown-linux-musl
+        job:
+          - target: x86_64-unknown-linux-musl
+          - target: aarch64-unknown-linux-musl
+            use-cross: true
     steps:
       - name: Checkout release ref
         uses: actions/checkout@v4
@@ -155,12 +157,17 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.job.target }}
 
       - name: Install Linux musl build dependencies
+        if: ${{ !matrix.job.use-cross }}
         run: |
           sudo apt-get update
           sudo apt-get install --yes musl-tools pkg-config
+
+      - name: Install cross
+        if: ${{ matrix.job.use-cross }}
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Update package version
         shell: bash
@@ -174,20 +181,26 @@ jobs:
           path: |
             ~/.cargo/git
             ~/.cargo/registry
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-static-${{ hashFiles('native/ex_turso/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.job.target }}-cargo-static-${{ hashFiles('native/ex_turso/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.target }}-cargo-static-
+            ${{ runner.os }}-${{ matrix.job.target }}-cargo-static-
             ${{ runner.os }}-cargo-static-
 
       - name: Build and package static NIF archive
         id: build_static
         shell: bash
         env:
-          TARGET: ${{ matrix.target }}
+          TARGET: ${{ matrix.job.target }}
+          USE_CROSS: ${{ matrix.job.use-cross || false }}
         run: |
           set -euo pipefail
 
-          cargo build --manifest-path native/ex_turso/Cargo.toml --target "${TARGET}" --release --locked
+          tool="cargo"
+          if [ "${USE_CROSS}" = "true" ]; then
+            tool="cross"
+          fi
+
+          "${tool}" build --manifest-path native/ex_turso/Cargo.toml --target "${TARGET}" --release --locked
 
           static_lib="native/ex_turso/target/${TARGET}/release/libex_turso.a"
           symbols="$(mktemp)"
@@ -204,7 +217,7 @@ jobs:
       - name: Upload static NIF archive artifact
         uses: actions/upload-artifact@v4
         with:
-          name: static-${{ matrix.target }}
+          name: static-${{ matrix.job.target }}
           path: ${{ steps.build_static.outputs.file-path }}
           if-no-files-found: error
 
