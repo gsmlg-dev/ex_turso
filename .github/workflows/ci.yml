@@ -81,5 +81,11 @@ jobs:
       - name: Build native crate
         run: cargo build --manifest-path native/ex_turso/Cargo.toml --locked
 
+      - name: Check static NIF archive
+        run: |
+          test -f native/ex_turso/target/debug/libex_turso.a
+          nm -g --defined-only native/ex_turso/target/debug/libex_turso.a \
+            | grep -q ' ex_turso_nif_init$'
+
       - name: Compile Elixir package
         run: mix compile --warnings-as-errors

@@ -24,6 +24,27 @@ Rust toolchain. Precompiled binaries are published for:
 | FreeBSD | `x86_64` |
 | Windows | `x86_64` |
 
+Releases also publish a static NIF archive for static BEAM builds:
+`ex_turso-vVERSION-static-x86_64-unknown-linux-musl.tar.gz`. The archive
+contains `libex_turso.a`, which exports `ex_turso_nif_init` for OTP's
+`ex_turso` static NIF library name. Use it when configuring OTP:
+
+```sh
+./configure --enable-static-nifs=/path/to/libex_turso.a:ex_turso
+```
+
+To build the archive from source instead:
+
+```sh
+rustup target add x86_64-unknown-linux-musl
+cargo build --manifest-path native/ex_turso/Cargo.toml \
+  --target x86_64-unknown-linux-musl \
+  --release \
+  --locked
+nm -g --defined-only native/ex_turso/target/x86_64-unknown-linux-musl/release/libex_turso.a \
+  | grep ' ex_turso_nif_init$'
+```
+
 Set `EX_TURSO_BUILD=1` to force a source build. Network-restricted builders can
 also use compile-time Mix config:
 

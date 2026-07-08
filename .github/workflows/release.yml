@@ -136,9 +136,83 @@ jobs:
           path: ${{ steps.build_nif.outputs.file-path }}
           if-no-files-found: error
 
+  build_static_archive:
+    name: Static NIF archive - ${{ matrix.target }}
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ inputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+    steps:
+      - name: Checkout release ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux musl build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools pkg-config
+
+      - name: Update package version
+        shell: bash
+        run: |
+          perl -0pi -e "s/^version = \"[^\"]+\"/version = \"${VERSION}\"/m" native/ex_turso/Cargo.toml
+          perl -0pi -e 's/(name = "ex_turso"\nversion = ")[^"]+"/${1}$ENV{VERSION}"/' native/ex_turso/Cargo.lock
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-static-${{ hashFiles('native/ex_turso/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-static-
+            ${{ runner.os }}-cargo-static-
+
+      - name: Build and package static NIF archive
+        id: build_static
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+
+          cargo build --manifest-path native/ex_turso/Cargo.toml --target "${TARGET}" --release --locked
+
+          static_lib="native/ex_turso/target/${TARGET}/release/libex_turso.a"
+          symbols="$(mktemp)"
+          nm -g --defined-only "${static_lib}" > "${symbols}"
+          grep -q ' ex_turso_nif_init$' "${symbols}"
+
+          artifact="ex_turso-v${VERSION}-static-${TARGET}.tar.gz"
+          tmpdir="$(mktemp -d)"
+          cp "${static_lib}" "${tmpdir}/libex_turso.a"
+          tar -C "${tmpdir}" -czf "${artifact}" libex_turso.a
+
+          echo "file-path=${artifact}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload static NIF archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-${{ matrix.target }}
+          path: ${{ steps.build_static.outputs.file-path }}
+          if-no-files-found: error
+
   publish:
     name: Publish Hex package and GitHub release
-    needs: build_precompiled
+    needs:
+      - build_precompiled
+      - build_static_archive
     runs-on: ubuntu-latest
     env:
       MIX_ENV: prod
@@ -227,6 +301,13 @@ jobs:
           path: artifacts/precompiled
           merge-multiple: true
 
+      - name: Download static NIF archive artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: static-*
+          path: artifacts/static
+          merge-multiple: true
+
       - name: Generate release notes
         run: |
           previous_tag="$(git describe --tags --abbrev=0 "v${VERSION}^" 2>/dev/null || true)"
@@ -236,7 +317,7 @@ jobs:
             git log --pretty=format:"- %s (%h)" "v${VERSION}" > release-notes.md
           fi
 
-      - name: Create or update GitHub release with precompiled NIFs
+      - name: Create or update GitHub release with native artifacts
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -247,6 +328,7 @@ jobs:
           fi
 
           gh release upload "v${VERSION}" artifacts/precompiled/*.tar.gz --clobber
+          gh release upload "v${VERSION}" artifacts/static/*.tar.gz --clobber
 
       - name: Generate precompiled checksums
         run: |

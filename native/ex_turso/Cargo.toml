@@ -7,7 +7,7 @@ edition = "2021"
 [lib]
 name = "ex_turso"
 path = "src/lib.rs"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 turso = { version = "0.5", features = ["sync"] }
