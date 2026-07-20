@@ -3,6 +3,11 @@
 [![CI](https://github.com/gsmlg-dev/ex_turso/actions/workflows/ci.yml/badge.svg)](https://github.com/gsmlg-dev/ex_turso/actions/workflows/ci.yml)
 [![Hex.pm](https://img.shields.io/hexpm/v/ex_turso.svg)](https://hex.pm/packages/ex_turso)
 
+> [!IMPORTANT]
+> This repository has been merged into
+> [`gsmlg-dev/concord`](https://github.com/gsmlg-dev/concord). New development
+> continues there; this repository is retained for historical releases.
+
 An Elixir library that wraps the [`turso`](https://crates.io/crates/turso) Rust
 crate (v0.5) via [Rustler](https://github.com/rusterlium/rustler) NIFs, exposed
 through a [`DBConnection`](https://hexdocs.pm/db_connection) pool.
